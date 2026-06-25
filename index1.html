@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2563eb">
+    <title>House Expense Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: {} }
+        }
+    </script>
+    <style>
+        @media print {
+            .no-print, nav, header, button { display: none !important; }
+            body { background: white !important; color: black !important; padding: 20px; overflow: visible !important; }
+            #app, #main-content { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
+            .print-only { display: block !important; }
+            #main-content > div { display: block !important; }
+            .bg-white, .dark\:bg-gray-800 { background: white !important; border: 1px solid #ddd !important; margin-bottom: 10px !important; }
+        }
+        button, select, input { min-height: 48px; }
+        body { -webkit-tap-highlight-color: transparent; }
+        #loader { transition: opacity 0.5s ease-out; }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-full transition-colors duration-300">
+
+    <div id="loader" class="fixed inset-0 bg-blue-600 z-[100] flex items-center justify-center text-white">
+        <div class="animate-pulse text-2xl font-bold tracking-widest">LOADING...</div>
+    </div>
+
+    <div id="app" class="pb-24 flex flex-col min-h-screen">
+        <header class="p-4 flex justify-between items-center bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-50 no-print">
+            <h1 class="text-xl font-bold truncate">Expense Manager</h1>
+            <button onclick="toggleTheme()" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 min-h-[44px] min-w-[44px]">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </header>
+
+        <main id="main-content" class="p-4 flex-grow w-full max-w-lg mx-auto">
+        </main>
+
+        <nav id="nav-bar" class="fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t dark:border-gray-700 flex justify-around p-2 shadow-lg z-40 no-print">
+        </nav>
+    </div>
+
+    <script>
+        window.addEventListener('load', () => {
+            const loader = document.getElementById('loader');
+            loader.style.opacity = '0';
+            setTimeout(() => loader.style.display = 'none', 500);
+        });
+
+        let expenses = JSON.parse(localStorage.getItem('expenses')) || [];
+        let purchasers = JSON.parse(localStorage.getItem('purchasers')) || ['Self'];
+        let history = JSON.parse(localStorage.getItem('history')) || [];
+        let lastSyncDate = localStorage.getItem('lastSyncDate') || new Date().toDateString();
+        let editItemId = null;
+        let quickName = '';
+        let quickCat = 'Grocery';
+        let currentView = 'dashboard';
+
+        function checkDayCycle() {
+            const today = new Date().toDateString();
+            if (lastSyncDate !== today) {
+                if (expenses.length > 0) {
+                    const total = expenses.reduce((s, e) => s + parseFloat(e.price), 0);
+                    history.push({ 
+                        monthYear: new Date(lastSyncDate).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }), 
+                        total: total,
+                        items: [...expenses],
+                        date: new Date(lastSyncDate).getTime() 
+                    });
+                }
+                expenses = [];
+                lastSyncDate = today;
+                localStorage.setItem('lastSyncDate', today);
+                saveData();
+            }
+        }
+
+        let isDarkMode = localStorage.getItem('theme') === 'dark';
+        if (isDarkMode) document.documentElement.classList.add('dark');
+
+        function toggleTheme() {
+            isDarkMode = !isDarkMode;
+            document.documentElement.classList.toggle('dark');
+            localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+            document.getElementById('theme-icon').innerText = isDarkMode ? '☀️' : '🌙';
+        }
+
+        function saveData() {
+            localStorage.setItem('expenses', JSON.stringify(expenses));
+            localStorage.setItem('purchasers', JSON.stringify(purchasers));
+            localStorage.setItem('history', JSON.stringify(history));
+        }
+
+        function renderNav() {
+            const nav = document.getElementById('nav-bar');
+            const items = [
+                { id: 'dashboard', label: 'Home' },
+                { id: 'add', label: 'Add' },
+                { id: 'list', label: 'List' },
+                { id: 'history', label: 'History' },
+                { id: 'purchasers', label: 'User' }
+            ];
+            nav.innerHTML = items.map(i => `
+                <button onclick="changeView('${i.id}')" class="flex flex-col items-center p-2 min-h-[48px] min-w-[48px] ${currentView === i.id ? 'text-blue-600 border-b-2 border-blue-600' : 'opacity-60'}">
+                    <span class="text-[10px] uppercase font-bold">${i.label}</span>
+                </button>
+            `).join('');
+        }
+
+        function changeView(view) { currentView = view; render(); }
+
+        function render() {
+            checkDayCycle();
+            renderNav();
+            const main = document.getElementById('main-content');
+            main.innerHTML = '';
+            if (currentView === 'dashboard') renderDashboard(main);
+            else if (currentView === 'add') renderAdd(main);
+            else if (currentView === 'list') renderList(main);
+            else if (currentView === 'history') renderHistory(main);
+            else if (currentView === 'purchasers') renderPurchasers(main);
+        }
+
+        function renderDashboard(container) {
+            const total = expenses.reduce((sum, e) => sum + parseFloat(e.price || 0), 0);
+            const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const cats = ['Grocery', 'Dairy', 'Vegetables', 'Cleaning', 'Other'];
+            container.innerHTML = `
+                <p class="text-sm opacity-60 mb-2 font-bold">${dateStr}</p>
+                <div class="p-6 bg-blue-600 text-white rounded-3xl shadow-lg mb-6">
+                    <p class="text-sm opacity-80">Today's Total Spend</p>
+                    <h2 class="text-4xl font-bold">₹${total.toFixed(2)}</h2>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    ${cats.map(c => {
+                        const sum = expenses.filter(e => e.category === c).reduce((s, e) => s + parseFloat(e.price || 0), 0);
+                        return `<div class="p-4 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-2xl shadow-sm">
+                                    <p class="text-[10px] uppercase opacity-60 font-bold">${c}</p>
+                                    <p class="font-bold text-lg">₹${sum.toFixed(2)}</p>
+                                </div>`;
+                    }).join('')}
+                </div>`;
+        }
+
+        function quickAdd(name, cat) {
+            quickName = name;
+            quickCat = cat;
+            changeView('add');
+        }
+
+        function renderAdd(container) {
+            const item = editItemId ? expenses.find(e => e.id === editItemId) : null;
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <div class="mb-4">
+                        <p class="text-xs font-bold opacity-60 mb-3 uppercase">Quick Add</p>
+                        <div class="grid grid-cols-4 gap-2">
+                            ${[{n:'Milk',c:'Dairy'},{n:'Buttermilk',c:'Grocery'},{n:'Vegetables',c:'Grocery'},{n:'Sugar',c:'Grocery'}].map(q => `
+                                <button onclick="quickAdd('${q.n}', '${q.c}')" class="bg-white dark:bg-gray-800 border dark:border-gray-700 p-2 rounded-2xl shadow-sm text-xs font-bold hover:scale-105 transition-transform">
+                                    ${q.n}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="space-y-4 bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm">
+                        <h3 class="font-bold text-lg">${editItemId ? 'Edit Expense' : 'Add New Expense'}</h3>
+                        <input id="prod-name" value="${item ? item.name : quickName}" class="w-full p-4 rounded-xl border bg-gray-50 dark:bg-gray-700" placeholder="Product Name">
+                        <input id="prod-price" type="number" class="w-full p-4 rounded-xl border bg-gray-50 dark:bg-gray-700" placeholder="Price (₹)">
+                        <select id="prod-cat" class="w-full p-4 rounded-xl border bg-gray-50 dark:bg-gray-700">
+                            ${['Grocery', 'Dairy', 'Vegetables', 'Cleaning', 'Other'].map(c => `<option value="${c}" ${item?.category === c || (!item && quickCat === c) ? 'selected' : ''}>${c}</option>`).join('')}
+                        </select>
+                        <select id="prod-purchaser" class="w-full p-4 rounded-xl border bg-gray-50 dark:bg-gray-700">
+                            ${purchasers.map(p => `<option value="${p}" ${item?.purchaser === p ? 'selected' : ''}>${p}</option>`).join('')}
+                        </select>
+                        <button onclick="saveExpense()" class="w-full bg-blue-600 text-white p-4 rounded-xl font-bold">${editItemId ? 'Update Item' : 'Add Item'}</button>
+                    </div>
+                </div>`;
+            quickName = '';
+        }
+
+        function saveExpense() {
+            const name = document.getElementById('prod-name').value;
+            const price = document.getElementById('prod-price').value;
+            const category = document.getElementById('prod-cat').value;
+            const purchaser = document.getElementById('prod-purchaser').value;
+            if(!name || !price) return;
+            
+            if (editItemId) {
+                const index = expenses.findIndex(e => e.id === editItemId);
+                expenses[index] = { id: editItemId, name, price, category, purchaser };
+                editItemId = null;
+            } else {
+                expenses.push({ id: Date.now(), name, price, category, purchaser });
+            }
+            saveData(); changeView('list');
+        }
+
+        function deleteExpense(id) {
+            expenses = expenses.filter(e => e.id !== id);
+            saveData(); render();
+        }
+
+        function editExpense(id) {
+            editItemId = id;
+            changeView('add');
+        }
+
+        function renderList(container) {
+            const total = expenses.reduce((sum, e) => sum + parseFloat(e.price || 0), 0);
+            container.innerHTML = `
+                <div class="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm mb-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="font-bold">Total: ₹${total.toFixed(2)}</h2>
+                        <button onclick="window.print()" class="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-lg text-sm font-bold no-print">Print</button>
+                    </div>
+                </div>
+                ${expenses.map(e => `
+                    <div class="flex justify-between items-center p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm mb-2">
+                        <div><p class="font-bold">${e.name}</p><p class="text-[10px] opacity-60">${e.category} • ${e.purchaser}</p></div>
+                        <div class="flex items-center gap-2">
+                            <p class="font-bold mr-2">₹${parseFloat(e.price).toFixed(2)}</p>
+                            <button onclick="editExpense(${e.id})" class="text-blue-500 p-2 no-print font-bold">Edit</button>
+                            <button onclick="deleteExpense(${e.id})" class="text-red-500 p-2 no-print font-bold">Delete</button>
+                        </div>
+                    </div>`).join('')}`;
+        }
+
+        function renderHistory(container) {
+            container.innerHTML = `<h3 class="font-bold text-lg mb-4">Past History</h3>
+                <div class="space-y-4">
+                    ${history.map(h => `
+                        <div class="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="font-bold">${h.monthYear}</span>
+                                <span class="font-bold text-blue-500">₹${h.total.toFixed(2)}</span>
+                            </div>
+                            <div class="text-xs opacity-70 mb-2">
+                                ${h.items?.map(i => i.name).join(', ') || 'No details'}
+                            </div>
+                            <button onclick="window.print()" class="w-full bg-gray-100 dark:bg-gray-700 py-1 rounded text-sm no-print">Print Report</button>
+                        </div>`).join('') || '<p class="opacity-50 text-center">No past history found.</p>'}
+                </div>`;
+        }
+
+        function renderPurchasers(container) {
+            container.innerHTML = `
+                <div class="space-y-4">
+                    <h3 class="font-bold text-lg">Manage Purchasers</h3>
+                    <div class="flex gap-2">
+                        <input id="new-p" class="flex-1 p-4 rounded-xl border bg-gray-50 dark:bg-gray-700" placeholder="Name">
+                        <button onclick="addPurchaser()" class="bg-green-600 text-white px-6 rounded-xl font-bold">+</button>
+                    </div>
+                    ${purchasers.map(p => `
+                        <div class="flex justify-between bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm">
+                            ${p} <button onclick="deletePurchaser('${p}')" class="text-red-500 font-bold">Remove</button>
+                        </div>`).join('')}
+                </div>`;
+        }
+
+        function addPurchaser() {
+            const name = document.getElementById('new-p').value;
+            if(name && !purchasers.includes(name)) { purchasers.push(name); saveData(); render(); }
+        }
+
+        function deletePurchaser(p) {
+            purchasers = purchasers.filter(x => x !== p); saveData(); render(); }
+
+        render();
+    </script>
+</body>
+</html>
